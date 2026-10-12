@@ -3,11 +3,92 @@
 <head>
     <title>Particle Life</title>
     <style>
-        body { margin: 0; background-color: #111; overflow: hidden; }
+        body { margin: 0; background-color: #0d0d12; overflow: hidden; font-family: 'Segoe UI', system-ui, sans-serif; color: #e2e8f0; }
         canvas { display: block; }
+        
+        #gearBtn { position: absolute; top: 15px; left: 15px; font-size: 24px; background: rgba(30, 41, 59, 0.5); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 5px 10px; cursor: pointer; z-index: 10; color: white; transition: background 0.2s; backdrop-filter: blur(5px); }
+        #gearBtn:hover { background: rgba(30, 41, 59, 0.9); }
+        
+        #panel {
+            position: absolute; top: 70px; left: 15px; width: 300px;
+            background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1); box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            padding: 20px; border-radius: 12px; display: block; z-index: 10;
+            max-height: 85vh; overflow-y: auto;
+        }
+        
+        .control { margin-bottom: 12px; }
+        .control label { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px; font-weight: 500; color: #94a3b8; }
+        .val-display { color: #38bdf8; font-weight: bold; }
+        
+        input[type=range] { width: 100%; cursor: pointer; accent-color: #38bdf8; }
+        input[type=number] { width: 70px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.2); color: white; border-radius: 4px; padding: 4px 6px; font-family: inherit; }
+        
+        hr { border: 0; height: 1px; background: rgba(255,255,255,0.1); margin: 15px 0; }
+        
+        button.primary { background: #0284c7; color: white; border: none; padding: 10px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; transition: background 0.2s; }
+        button.primary:hover { background: #0369a1; }
+
+        .preset-group { display: flex; gap: 5px; margin-bottom: 15px; }
+        .preset-btn { flex: 1; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; padding: 6px 0; border-radius: 4px; cursor: pointer; font-size: 12px; transition: 0.2s; }
+        .preset-btn:hover { background: rgba(255,255,255,0.2); }
+
+        .matrix-title { font-size: 13px; font-weight: bold; margin-bottom: 10px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; }
+        #matrixContainer { display: grid; gap: 4px; align-items: center; justify-items: center; }
+        .matrix-header { width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.3); }
     </style>
 </head>
 <body>
+    <button id="gearBtn">⚙️</button>
+    
+    <div id="panel">
+        <div class="matrix-title">Presets</div>
+        <div class="preset-group">
+            <button class="preset-btn" id="btnCells">Cells</button>
+            <button class="preset-btn" id="btnSnakes">Snakes</button>
+            <button class="preset-btn" id="btnEcosystem">Ecosystem</button>
+        </div>
+
+        <div class="control">
+            <label>Speed <span id="speedVal" class="val-display">0.5</span></label>
+            <input type="range" id="speedInput" min="0.1" max="2.0" step="0.1" value="0.5">
+        </div>
+        <div class="control" style="display:flex; justify-content:space-between; align-items:center;">
+            <label style="margin:0;">Colors</label>
+            <input type="number" id="colorInput" min="1" max="10" value="4">
+        </div>
+        <div class="control" style="display:flex; justify-content:space-between; align-items:center;">
+            <label style="margin:0;">Particles</label>
+            <input type="number" id="particleInput" min="100" max="5000" step="100" value="1500">
+        </div>
+        
+        <hr>
+        
+        <div class="control">
+            <label>Min Radius (Repel) <span id="rminVal" class="val-display">15</span></label>
+            <input type="range" id="rminInput" min="1" max="50" step="1" value="15">
+        </div>
+        <div class="control">
+            <label>Max Radius (Attract) <span id="rmaxVal" class="val-display">80</span></label>
+            <input type="range" id="rmaxInput" min="20" max="200" step="5" value="80">
+        </div>
+        <div class="control">
+            <label>Friction (Drag) <span id="fricVal" class="val-display">0.15</span></label>
+            <input type="range" id="fricInput" min="0.0" max="0.99" step="0.01" value="0.15">
+        </div>
+        <div class="control">
+            <label>Repel Force <span id="repelVal" class="val-display">3.0</span></label>
+            <input type="range" id="repelInput" min="0.5" max="10.0" step="0.5" value="3.0">
+        </div>
+        
+        <button id="restartBtn" class="primary" style="margin-top: 10px;">Generate Random Rules</button>
+
+        <hr>
+        
+        <div class="matrix-title">Interaction Matrix</div>
+        <div id="matrixContainer"></div>
+    </div>
+
     <canvas id="simCanvas"></canvas>
     <script src="engine.js"></script>
     <script src="sim.js"></script>

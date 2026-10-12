@@ -889,6 +889,8 @@ async function createWasm() {
   var __abort_js = () =>
       abort('native code called abort()');
 
+  var _emscripten_date_now = () => Date.now();
+
   var abortOnCannotGrowMemory = (requestedSize) => {
       abort(`Cannot enlarge memory arrays to size ${requestedSize} bytes (OOM). Either (1) compile with -sINITIAL_MEMORY=X with X higher than the current value ${HEAP8.length}, (2) compile with -sALLOW_MEMORY_GROWTH which allows increasing the size at runtime, or (3) if you want malloc to return NULL (0) instead of this abort, compile with -sABORTING_MALLOC=0`);
     };
@@ -1539,8 +1541,10 @@ function checkIncomingModuleAPI() {
 // Imports from the Wasm binary.
 var _getData = Module['_getData'] = makeInvalidEarlyAccess('_getData');
 var _getParticleCount = Module['_getParticleCount'] = makeInvalidEarlyAccess('_getParticleCount');
+var _getMatrix = Module['_getMatrix'] = makeInvalidEarlyAccess('_getMatrix');
 var _init_matrix = Module['_init_matrix'] = makeInvalidEarlyAccess('_init_matrix');
 var _init_particles = Module['_init_particles'] = makeInvalidEarlyAccess('_init_particles');
+var _step = Module['_step'] = makeInvalidEarlyAccess('_step');
 var _fflush = makeInvalidEarlyAccess('_fflush');
 var _strerror = makeInvalidEarlyAccess('_strerror');
 var _setThrew = makeInvalidEarlyAccess('_setThrew');
@@ -1558,8 +1562,10 @@ var wasmMemory = makeInvalidEarlyAccess('wasmMemory');
 function assignWasmExports(wasmExports) {
   assert(typeof wasmExports['getData'] != 'undefined', 'missing Wasm export: getData');
   assert(typeof wasmExports['getParticleCount'] != 'undefined', 'missing Wasm export: getParticleCount');
+  assert(typeof wasmExports['getMatrix'] != 'undefined', 'missing Wasm export: getMatrix');
   assert(typeof wasmExports['init_matrix'] != 'undefined', 'missing Wasm export: init_matrix');
   assert(typeof wasmExports['init_particles'] != 'undefined', 'missing Wasm export: init_particles');
+  assert(typeof wasmExports['step'] != 'undefined', 'missing Wasm export: step');
   assert(typeof wasmExports['fflush'] != 'undefined', 'missing Wasm export: fflush');
   assert(typeof wasmExports['strerror'] != 'undefined', 'missing Wasm export: strerror');
   assert(typeof wasmExports['setThrew'] != 'undefined', 'missing Wasm export: setThrew');
@@ -1574,8 +1580,10 @@ function assignWasmExports(wasmExports) {
   assert(typeof wasmExports['__indirect_function_table'] != 'undefined', 'missing Wasm export: __indirect_function_table');
   _getData = Module['_getData'] = createExportWrapper('getData', wasmExports['getData'], 0);
   _getParticleCount = Module['_getParticleCount'] = createExportWrapper('getParticleCount', wasmExports['getParticleCount'], 0);
-  _init_matrix = Module['_init_matrix'] = createExportWrapper('init_matrix', wasmExports['init_matrix'], 0);
-  _init_particles = Module['_init_particles'] = createExportWrapper('init_particles', wasmExports['init_particles'], 2);
+  _getMatrix = Module['_getMatrix'] = createExportWrapper('getMatrix', wasmExports['getMatrix'], 0);
+  _init_matrix = Module['_init_matrix'] = createExportWrapper('init_matrix', wasmExports['init_matrix'], 1);
+  _init_particles = Module['_init_particles'] = createExportWrapper('init_particles', wasmExports['init_particles'], 3);
+  _step = Module['_step'] = createExportWrapper('step', wasmExports['step'], 7);
   _fflush = createExportWrapper('fflush', wasmExports['fflush'], 1);
   _strerror = createExportWrapper('strerror', wasmExports['strerror'], 1);
   _setThrew = createExportWrapper('setThrew', wasmExports['setThrew'], 2);
@@ -1595,6 +1603,8 @@ var wasmImports = {
   __cxa_throw: ___cxa_throw,
   /** @export */
   _abort_js: __abort_js,
+  /** @export */
+  emscripten_date_now: _emscripten_date_now,
   /** @export */
   emscripten_resize_heap: _emscripten_resize_heap,
   /** @export */
