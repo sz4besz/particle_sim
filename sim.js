@@ -8,35 +8,48 @@ function resize() {
 window.addEventListener('resize', resize);
 resize();
 
-// --- PRESETS ---
-// These specific matrices create known emergent behaviors
+// --- DYNAMIC PRESET GENERATORS ---
 const PRESETS = {
-    'cells': {
-        colors: 3, particles: 2000, speed: 0.5, rmin: 15, rmax: 80, fric: 0.15, repel: 3.0,
-        matrix: [ // Like colors attract strongly, opposites repel
-             1.0, -0.5, -0.5,
-            -0.5,  1.0, -0.5,
-            -0.5, -0.5,  1.0
-        ]
+    'cells': (N) => {
+        let m = new Float32Array(N * N);
+        for(let i=0; i<N; i++) {
+            for(let j=0; j<N; j++) {
+                m[i*N + j] = (i === j) ? 1.0 : -1.0;
+            }
+        }
+        return { speed: 0.5, rmin: 15, rmax: 80, fric: 0.20, repel: 5.0, matrix: m };
     },
-    'snakes': {
-        colors: 4, particles: 1800, speed: 0.8, rmin: 10, rmax: 55, fric: 0.10, repel: 2.0,
-        matrix: [ // Asymmetric hunting: A chases B, B chases C, etc.
-             0.2,  1.0, -1.0, -1.0,
-            -1.0,  0.2,  1.0, -1.0,
-            -1.0, -1.0,  0.2,  1.0,
-             1.0, -1.0, -1.0,  0.2
-        ]
+    'chains': (N) => {
+        let m = new Float32Array(N * N);
+        for(let i=0; i<N; i++) {
+            for(let j=0; j<N; j++) {
+                // Determine how far apart these colors are in the sequence (0 to N-1)
+                let dist = Math.min((i - j + N) % N, (j - i + N) % N);
+                
+                if (dist === 1) {
+                    m[i*N + j] = 1.0; // Strong mutual attraction with direct neighbors
+                } else if (dist === 0) {
+                    m[i*N + j] = -0.5; // Repel self to prevent blob clumping
+                } else {
+                    m[i*N + j] = -0.2; // Weak repel for other colors to keep chains clean
+                }
+            }
+        }
+        // Slightly lower rmax helps them snap into tight lines without collapsing
+        return { speed: 0.5, rmin: 20, rmax: 55, fric: 0.15, repel: 3.5, matrix: m };
     },
-    'ecosystem': {
-        colors: 5, particles: 2500, speed: 0.5, rmin: 12, rmax: 90, fric: 0.20, repel: 4.0,
-        matrix: [ // Complex chains of attraction and repulsion
-             0.8, -0.2,  0.5, -0.5,  0.0,
-            -0.5,  0.7, -0.2,  0.5,  0.0,
-             0.0, -0.5,  0.9, -0.2,  0.5,
-             0.5,  0.0, -0.5,  0.8, -0.2,
-            -0.2,  0.5,  0.0, -0.5,  0.7
-        ]
+    'ecosystem': (N) => {
+        let m = new Float32Array(N * N);
+        for(let i=0; i<N; i++) {
+            for(let j=0; j<N; j++) {
+                if (i === j) m[i*N + j] = 1.0; 
+                else {
+                    let val = Math.sin(i * 12.9898 + j * 78.233) * 43758.5453;
+                    m[i*N + j] = (val - Math.floor(val)) * 2.0 - 1.0; 
+                }
+            }
+        }
+        return { speed: 0.5, rmin: 15, rmax: 85, fric: 0.25, repel: 5.0, matrix: m };
     }
 };
 
@@ -50,10 +63,13 @@ Module.onRuntimeInitialized = function() {
     let count = 0;
     let particleData;
     let colors = [];
+    let currentColors = 0;
 
     const gearBtn = document.getElementById('gearBtn');
     const panel = document.getElementById('panel');
-    const restartBtn = document.getElementById('restartBtn');
+    
+    const applySizesBtn = document.getElementById('applySizesBtn');
+    const randomBtn = document.getElementById('randomBtn');
     
     const speedInput = document.getElementById('speedInput');
     const colorInput = document.getElementById('colorInput');
@@ -119,53 +135,55 @@ Module.onRuntimeInitialized = function() {
         }
     }
 
-    function initSim(presetName = null) {
-        // If a preset was clicked, override the UI sliders
-        if (presetName && PRESETS[presetName]) {
-            const p = PRESETS[presetName];
-            colorInput.value = p.colors;
-            particleInput.value = p.particles;
-            speedInput.value = p.speed;     document.getElementById('speedVal').innerText = p.speed;
-            rminInput.value = p.rmin;       document.getElementById('rminVal').innerText = p.rmin;
-            rmaxInput.value = p.rmax;       document.getElementById('rmaxVal').innerText = p.rmax;
-            fricInput.value = p.fric;       document.getElementById('fricVal').innerText = p.fric;
-            repelInput.value = p.repel;     document.getElementById('repelVal').innerText = p.repel;
-        }
-
-        const numColors = parseInt(colorInput.value);
+    function restartEngine() {
+        currentColors = parseInt(colorInput.value);
         const numParticles = parseInt(particleInput.value);
 
         colors = [];
-        for (let i = 0; i < numColors; i++) {
-            colors.push(`hsl(${(i * 360) / numColors}, 100%, 60%)`);
+        for (let i = 0; i < currentColors; i++) {
+            colors.push(`hsl(${(i * 360) / currentColors}, 100%, 60%)`);
         }
 
-        // Initialize C++ (This normally randomizes the rules)
-        Module._init_matrix(numColors);
+        Module._init_matrix(currentColors);
         Module._init_particles(canvas.width, canvas.height, numParticles);
-
-        // If using a preset, manually overwrite the C++ memory array with our exact rules
-        if (presetName && PRESETS[presetName]) {
-            const p = PRESETS[presetName];
-            const matrixPtr = Module._getMatrix();
-            const matrixData = Module.HEAPF32.subarray(matrixPtr / 4, (matrixPtr / 4) + (p.colors * p.colors));
-            for(let i = 0; i < p.matrix.length; i++) {
-                matrixData[i] = p.matrix[i];
-            }
-        }
 
         const pointer = Module._getData();
         count = Module._getParticleCount();
         particleData = Module.HEAPF32.subarray(pointer / 4, (pointer / 4) + (count * 5));
 
-        renderMatrixUI(numColors);
+        renderMatrixUI(currentColors);
     }
 
-    // Hook up buttons
-    restartBtn.addEventListener('click', () => initSim(null)); // Random
-    document.getElementById('btnCells').addEventListener('click', () => initSim('cells'));
-    document.getElementById('btnSnakes').addEventListener('click', () => initSim('snakes'));
-    document.getElementById('btnEcosystem').addEventListener('click', () => initSim('ecosystem'));
+    function applyRules(type) {
+        const matrixPtr = Module._getMatrix();
+        const matrixData = Module.HEAPF32.subarray(matrixPtr / 4, (matrixPtr / 4) + (currentColors * currentColors));
+
+        if (type === 'random') {
+            for(let i = 0; i < matrixData.length; i++) {
+                matrixData[i] = Math.random() * 2.0 - 1.0;
+            }
+        } else if (PRESETS[type]) {
+            const p = PRESETS[type](currentColors);
+            
+            speedInput.value = p.speed;     document.getElementById('speedVal').innerText = p.speed;
+            rminInput.value = p.rmin;       document.getElementById('rminVal').innerText = p.rmin;
+            rmaxInput.value = p.rmax;       document.getElementById('rmaxVal').innerText = p.rmax;
+            fricInput.value = p.fric;       document.getElementById('fricVal').innerText = p.fric;
+            repelInput.value = p.repel;     document.getElementById('repelVal').innerText = p.repel;
+            
+            for(let i = 0; i < matrixData.length; i++) {
+                matrixData[i] = p.matrix[i];
+            }
+        }
+        
+        renderMatrixUI(currentColors);
+    }
+
+    applySizesBtn.addEventListener('click', restartEngine);
+    randomBtn.addEventListener('click', () => applyRules('random'));
+    document.getElementById('btnCells').addEventListener('click', () => applyRules('cells'));
+    document.getElementById('btnChains').addEventListener('click', () => applyRules('chains'));
+    document.getElementById('btnEcosystem').addEventListener('click', () => applyRules('ecosystem'));
 
     function draw() {
         const speed = parseFloat(speedInput.value);
@@ -173,7 +191,6 @@ Module.onRuntimeInitialized = function() {
         const r_max = parseFloat(rmaxInput.value);
         const repel = parseFloat(repelInput.value);
         
-        // Invert friction for C++
         const rawFrictionValue = parseFloat(fricInput.value);
         const cFriction = 1.0 - rawFrictionValue; 
 
@@ -197,6 +214,7 @@ Module.onRuntimeInitialized = function() {
         requestAnimationFrame(draw);
     }
     
-    initSim('cells'); // Start with the Cells preset loaded
+    restartEngine();
+    applyRules('chains'); // Starts directly on the new Chains setting
     draw();
 };

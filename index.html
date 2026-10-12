@@ -29,9 +29,12 @@
         button.primary { background: #0284c7; color: white; border: none; padding: 10px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; transition: background 0.2s; }
         button.primary:hover { background: #0369a1; }
 
+        button.secondary { background: rgba(255,255,255,0.1); color: white; border: 1px solid rgba(255,255,255,0.2); padding: 8px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; transition: 0.2s; }
+        button.secondary:hover { background: rgba(255,255,255,0.2); }
+
         .preset-group { display: flex; gap: 5px; margin-bottom: 15px; }
-        .preset-btn { flex: 1; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; padding: 6px 0; border-radius: 4px; cursor: pointer; font-size: 12px; transition: 0.2s; }
-        .preset-btn:hover { background: rgba(255,255,255,0.2); }
+        .preset-btn { flex: 1; background: rgba(16, 185, 129, 0.2); border: 1px solid rgba(16, 185, 129, 0.5); color: #34d399; padding: 8px 0; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold; transition: 0.2s; }
+        .preset-btn:hover { background: rgba(16, 185, 129, 0.4); }
 
         .matrix-title { font-size: 13px; font-weight: bold; margin-bottom: 10px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; }
         #matrixContainer { display: grid; gap: 4px; align-items: center; justify-items: center; }
@@ -42,28 +45,31 @@
     <button id="gearBtn">⚙️</button>
     
     <div id="panel">
-        <div class="matrix-title">Presets</div>
+        <div class="matrix-title">Behavior Presets</div>
         <div class="preset-group">
             <button class="preset-btn" id="btnCells">Cells</button>
-            <button class="preset-btn" id="btnSnakes">Snakes</button>
+            <button class="preset-btn" id="btnChains">Chains</button>
             <button class="preset-btn" id="btnEcosystem">Ecosystem</button>
         </div>
+        
+        <hr>
 
+        <div class="control" style="display:flex; justify-content:space-between; align-items:center;">
+            <label style="margin:0;">Colors</label>
+            <input type="number" id="colorInput" min="1" max="20" value="4">
+        </div>
+        <div class="control" style="display:flex; justify-content:space-between; align-items:center;">
+            <label style="margin:0;">Particles</label>
+            <input type="number" id="particleInput" min="100" max="20000" step="100" value="3000">
+        </div>
+        <button id="applySizesBtn" class="secondary" style="margin-bottom: 5px;">Apply Sizes & Restart</button>
+        
+        <hr>
+        
         <div class="control">
             <label>Speed <span id="speedVal" class="val-display">0.5</span></label>
             <input type="range" id="speedInput" min="0.1" max="2.0" step="0.1" value="0.5">
         </div>
-        <div class="control" style="display:flex; justify-content:space-between; align-items:center;">
-            <label style="margin:0;">Colors</label>
-            <input type="number" id="colorInput" min="1" max="10" value="4">
-        </div>
-        <div class="control" style="display:flex; justify-content:space-between; align-items:center;">
-            <label style="margin:0;">Particles</label>
-            <input type="number" id="particleInput" min="100" max="5000" step="100" value="1500">
-        </div>
-        
-        <hr>
-        
         <div class="control">
             <label>Min Radius (Repel) <span id="rminVal" class="val-display">15</span></label>
             <input type="range" id="rminInput" min="1" max="50" step="1" value="15">
@@ -73,15 +79,15 @@
             <input type="range" id="rmaxInput" min="20" max="200" step="5" value="80">
         </div>
         <div class="control">
-            <label>Friction (Drag) <span id="fricVal" class="val-display">0.15</span></label>
-            <input type="range" id="fricInput" min="0.0" max="0.99" step="0.01" value="0.15">
+            <label>Friction (Drag) <span id="fricVal" class="val-display">0.20</span></label>
+            <input type="range" id="fricInput" min="0.0" max="0.99" step="0.01" value="0.20">
         </div>
         <div class="control">
-            <label>Repel Force <span id="repelVal" class="val-display">3.0</span></label>
-            <input type="range" id="repelInput" min="0.5" max="10.0" step="0.5" value="3.0">
+            <label>Repel Force <span id="repelVal" class="val-display">5.0</span></label>
+            <input type="range" id="repelInput" min="0.5" max="10.0" step="0.5" value="5.0">
         </div>
         
-        <button id="restartBtn" class="primary" style="margin-top: 10px;">Generate Random Rules</button>
+        <button id="randomBtn" class="primary" style="margin-top: 10px;">Randomize Matrix Rules</button>
 
         <hr>
         
@@ -90,6 +96,7 @@
     </div>
 
     <canvas id="simCanvas"></canvas>
+    
     <script src="engine.js"></script>
     <script src="sim.js"></script>
 </body>
