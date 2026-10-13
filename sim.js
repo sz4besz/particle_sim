@@ -13,9 +13,7 @@ const PRESETS = {
     'cells': (N) => {
         let m = new Float32Array(N * N);
         for(let i=0; i<N; i++) {
-            for(let j=0; j<N; j++) {
-                m[i*N + j] = (i === j) ? 1.0 : -1.0;
-            }
+            for(let j=0; j<N; j++) m[i*N + j] = (i === j) ? 1.0 : -1.0;
         }
         return { speed: 0.5, rmin: 15, rmax: 80, fric: 0.20, repel: 5.0, matrix: m };
     },
@@ -23,19 +21,12 @@ const PRESETS = {
         let m = new Float32Array(N * N);
         for(let i=0; i<N; i++) {
             for(let j=0; j<N; j++) {
-                // Determine how far apart these colors are in the sequence (0 to N-1)
                 let dist = Math.min((i - j + N) % N, (j - i + N) % N);
-                
-                if (dist === 1) {
-                    m[i*N + j] = 1.0; // Strong mutual attraction with direct neighbors
-                } else if (dist === 0) {
-                    m[i*N + j] = -0.5; // Repel self to prevent blob clumping
-                } else {
-                    m[i*N + j] = -0.2; // Weak repel for other colors to keep chains clean
-                }
+                if (dist === 1) m[i*N + j] = 1.0; 
+                else if (dist === 0) m[i*N + j] = -0.5; 
+                else m[i*N + j] = -0.2; 
             }
         }
-        // Slightly lower rmax helps them snap into tight lines without collapsing
         return { speed: 0.5, rmin: 20, rmax: 55, fric: 0.15, repel: 3.5, matrix: m };
     },
     'ecosystem': (N) => {
@@ -67,7 +58,6 @@ Module.onRuntimeInitialized = function() {
 
     const gearBtn = document.getElementById('gearBtn');
     const panel = document.getElementById('panel');
-    
     const applySizesBtn = document.getElementById('applySizesBtn');
     const randomBtn = document.getElementById('randomBtn');
     
@@ -122,11 +112,9 @@ Module.onRuntimeInitialized = function() {
                 cell.style.borderRadius = '4px';
                 
                 const intensity = Math.abs(rule);
-                if (rule < 0) {
-                    cell.style.backgroundColor = `rgba(239, 68, 68, ${intensity})`; 
-                } else {
-                    cell.style.backgroundColor = `rgba(34, 197, 94, ${intensity})`; 
-                }
+                cell.style.backgroundColor = rule < 0 
+                    ? `rgba(239, 68, 68, ${intensity})` 
+                    : `rgba(34, 197, 94, ${intensity})`;
                 
                 cell.style.color = intensity > 0.5 ? '#fff' : 'rgba(255,255,255,0.5)';
                 cell.innerText = rule.toFixed(1);
@@ -159,21 +147,15 @@ Module.onRuntimeInitialized = function() {
         const matrixData = Module.HEAPF32.subarray(matrixPtr / 4, (matrixPtr / 4) + (currentColors * currentColors));
 
         if (type === 'random') {
-            for(let i = 0; i < matrixData.length; i++) {
-                matrixData[i] = Math.random() * 2.0 - 1.0;
-            }
+            for(let i = 0; i < matrixData.length; i++) matrixData[i] = Math.random() * 2.0 - 1.0;
         } else if (PRESETS[type]) {
             const p = PRESETS[type](currentColors);
-            
             speedInput.value = p.speed;     document.getElementById('speedVal').innerText = p.speed;
             rminInput.value = p.rmin;       document.getElementById('rminVal').innerText = p.rmin;
             rmaxInput.value = p.rmax;       document.getElementById('rmaxVal').innerText = p.rmax;
             fricInput.value = p.fric;       document.getElementById('fricVal').innerText = p.fric;
             repelInput.value = p.repel;     document.getElementById('repelVal').innerText = p.repel;
-            
-            for(let i = 0; i < matrixData.length; i++) {
-                matrixData[i] = p.matrix[i];
-            }
+            for(let i = 0; i < matrixData.length; i++) matrixData[i] = p.matrix[i];
         }
         
         renderMatrixUI(currentColors);
@@ -190,31 +172,41 @@ Module.onRuntimeInitialized = function() {
         const r_min = parseFloat(rminInput.value);
         const r_max = parseFloat(rmaxInput.value);
         const repel = parseFloat(repelInput.value);
-        
-        const rawFrictionValue = parseFloat(fricInput.value);
-        const cFriction = 1.0 - rawFrictionValue; 
+        const cFriction = 1.0 - parseFloat(fricInput.value); 
 
+        // Advance Physics
         Module._step(canvas.width, canvas.height, speed, r_min, r_max, cFriction, repel);
         
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        // Clear screen with a solid dark color
+        ctx.fillStyle = '#0d0d12';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
         
-        for (let i = 0; i < count; i++) {
-            let base = i * 5;
-            let x = particleData[base];
-            let y = particleData[base + 1];
-            let colorIndex = particleData[base + 4];
-
+        // --- HIGH PERFORMANCE BATCH RENDERING ---
+        // Loop through each color palette ONCE
+        for (let c = 0; c < currentColors; c++) {
+            ctx.fillStyle = colors[c];
             ctx.beginPath();
-            ctx.arc(x, y, 3, 0, Math.PI * 2);
-            ctx.fillStyle = colors[colorIndex];
+            
+            // Draw all particles of this color in a single path
+            for (let i = 0; i < count; i++) {
+                let base = i * 5;
+                let colorIndex = particleData[base + 4];
+
+                if (colorIndex === c) {
+                    let x = particleData[base];
+                    let y = particleData[base + 1];
+                    // Rectangles draw much faster than round arcs on CPU
+                    ctx.rect(x - 1.5, y - 1.5, 3, 3);
+                }
+            }
+            // Execute the batch draw
             ctx.fill();
-            ctx.closePath();
         }
         
         requestAnimationFrame(draw);
     }
     
     restartEngine();
-    applyRules('chains'); // Starts directly on the new Chains setting
+    applyRules('chains'); 
     draw();
 };
