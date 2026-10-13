@@ -15,12 +15,12 @@ document.addEventListener('keydown', (event) => {
 });
 
 function resize() {
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = window.innerWidth * dpr;
-    canvas.height = window.innerHeight * dpr;
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
     canvas.style.width = window.innerWidth + 'px';
     canvas.style.height = window.innerHeight + 'px';
 }
+
 window.addEventListener('resize', resize);
 resize();
 
