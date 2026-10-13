@@ -184,6 +184,12 @@ Module.onRuntimeInitialized = async function() {
     let count = 0;
     let currentColors = 0;
     let particleDataPointer = 0;
+    let lastTime = performance.now();
+    let frames = 0;
+    let lastFps = 0;
+    let accumPhys = 0;
+    let accumRender = 0;
+    const metricsDiv = document.getElementById('metrics');
 
     const applySizesBtn = document.getElementById('applySizesBtn');
     const randomBtn = document.getElementById('randomBtn');
@@ -299,6 +305,7 @@ Module.onRuntimeInitialized = async function() {
     document.getElementById('btnEcosystem').addEventListener('click', () => applyRules('ecosystem'));
 
     function draw() {
+        const t0 = performance.now();
         const speed = parseFloat(speedInput.value);
         const r_min = parseFloat(rminInput.value);
         const r_max = parseFloat(rmaxInput.value);
@@ -307,6 +314,7 @@ Module.onRuntimeInitialized = async function() {
 
         // 1. Calculate Physics on CPU/WASM
         Module._step(canvas.width, canvas.height, speed, r_min, r_max, cFriction, repel);
+        const t1 = performance.now();
         
         // 2. Upload WASM memory directly to GPU Storage Buffer
         const wasmMemory = Module.HEAPF32.buffer;
@@ -343,6 +351,20 @@ Module.onRuntimeInitialized = async function() {
         passEncoder.end();
 
         device.queue.submit([commandEncoder.finish()]);
+        const t2 = performance.now();
+        accumPhys += (t1 - t0);
+        accumRender += (t2 - t1);
+        frames++;
+
+        if (t2 - lastTime >= 1000) {
+            const avgPhys = (accumPhys / frames).toFixed(2);
+            const avgRender = (accumRender / frames).toFixed(2);
+            metricsDiv.innerHTML = `FPS: ${frames}<br>Phys: ${avgPhys}ms<br>Render: ${avgRender}ms`;
+            frames = 0;
+            accumPhys = 0;
+            accumRender = 0;
+            lastTime = t2;
+        }
         
         requestAnimationFrame(draw);
     }
