@@ -1,5 +1,19 @@
 const canvas = document.getElementById('simCanvas');
 const ctx = canvas.getContext('2d');
+const metricsBtn = document.getElementById('metricsBtn');
+const metricsDiv = document.getElementById('metrics');
+
+document.addEventListener('keydown', (event) => {
+    if (event.key.toLowerCase() !== 'm') {
+        return;
+    }
+
+    const isVisible = getComputedStyle(metricsBtn).display !== 'none';
+    metricsBtn.style.display = isVisible ? 'none' : 'flex';
+    if (isVisible) {
+        metricsDiv.style.display = 'none';
+    }
+});
 
 function resize() {
     canvas.width = window.innerWidth;
@@ -63,13 +77,11 @@ Module.onRuntimeInitialized = function() {
     let previousFrameTime = performance.now();
     let frameTimes = [];
     let missedFrames = 0;
-    const metricsDiv = document.getElementById('metrics');
     let metricsContent = 'FPS: 0 | 1%: 0<br>Frame: 0.00ms | Missed: 0<br>' +
         'Phys: 0.00ms | CPU Render: 0.00ms<br>GPU: N/A<br>Particles: 0 | DPR: 1.00';
 
     const gearBtn = document.getElementById('gearBtn');
     const panel = document.getElementById('panel');
-    const metricsBtn = document.getElementById('metricsBtn');
     const applySizesBtn = document.getElementById('applySizesBtn');
     const randomBtn = document.getElementById('randomBtn');
     
@@ -101,18 +113,6 @@ Module.onRuntimeInitialized = function() {
             metricsDiv.innerHTML = metricsContent;
         }
         metricsDiv.style.display = opening ? 'block' : 'none';
-    });
-
-    document.addEventListener('keydown', (event) => {
-        if (event.key.toLowerCase() !== 'm') {
-            return;
-        }
-
-        const isVisible = metricsBtn.style.display !== 'none';
-        metricsBtn.style.display = isVisible ? 'none' : 'flex';
-        if (isVisible) {
-            metricsDiv.style.display = 'none';
-        }
     });
 
     function renderMatrixUI(numColors) {
