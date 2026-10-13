@@ -55,9 +55,21 @@ Module.onRuntimeInitialized = function() {
     let particleData;
     let colors = [];
     let currentColors = 0;
+    let lastTime = performance.now();
+    let frames = 0;
+    let lastFps = 0;
+    let accumPhys = 0;
+    let accumRender = 0;
+    let previousFrameTime = performance.now();
+    let frameTimes = [];
+    let missedFrames = 0;
+    const metricsDiv = document.getElementById('metrics');
+    let metricsContent = 'FPS: 0 | 1%: 0<br>Frame: 0.00ms | Missed: 0<br>' +
+        'Phys: 0.00ms | CPU Render: 0.00ms<br>GPU: N/A<br>Particles: 0 | DPR: 1.00';
 
     const gearBtn = document.getElementById('gearBtn');
     const panel = document.getElementById('panel');
+    const metricsBtn = document.getElementById('metricsBtn');
     const applySizesBtn = document.getElementById('applySizesBtn');
     const randomBtn = document.getElementById('randomBtn');
     
@@ -76,7 +88,31 @@ Module.onRuntimeInitialized = function() {
     bindSlider('repelInput', 'repelVal');
 
     gearBtn.addEventListener('click', () => {
-        panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+        const opening = panel.style.display === 'none';
+        panel.style.display = opening ? 'block' : 'none';
+        if (opening) {
+            metricsDiv.style.display = 'none';
+        }
+    });
+
+    metricsBtn.addEventListener('click', () => {
+        const opening = metricsDiv.style.display === 'none';
+        if (opening) {
+            metricsDiv.innerHTML = metricsContent;
+        }
+        metricsDiv.style.display = opening ? 'block' : 'none';
+    });
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key.toLowerCase() !== 'm') {
+            return;
+        }
+
+        const isVisible = metricsBtn.style.display !== 'none';
+        metricsBtn.style.display = isVisible ? 'none' : 'flex';
+        if (isVisible) {
+            metricsDiv.style.display = 'none';
+        }
     });
 
     function renderMatrixUI(numColors) {
@@ -168,6 +204,7 @@ Module.onRuntimeInitialized = function() {
     document.getElementById('btnEcosystem').addEventListener('click', () => applyRules('ecosystem'));
 
     function draw() {
+        const t0 = performance.now();
         const speed = parseFloat(speedInput.value);
         const r_min = parseFloat(rminInput.value);
         const r_max = parseFloat(rmaxInput.value);
@@ -176,6 +213,7 @@ Module.onRuntimeInitialized = function() {
 
         // Advance Physics
         Module._step(canvas.width, canvas.height, speed, r_min, r_max, cFriction, repel);
+        const t1 = performance.now();
         
         // Clear screen with a solid dark color
         ctx.fillStyle = '#0d0d12';
@@ -201,6 +239,44 @@ Module.onRuntimeInitialized = function() {
             }
             // Execute the batch draw
             ctx.fill();
+        }
+
+        const t2 = performance.now();
+        const frameTime = t2 - previousFrameTime;
+        previousFrameTime = t2;
+        accumPhys += (t1 - t0);
+        accumRender += (t2 - t1);
+        frameTimes.push(frameTime);
+        if (frameTime > (1000 / 60) * 1.1) {
+            missedFrames++;
+        }
+        frames++;
+
+        if (t2 - lastTime >= 1000) {
+            const avgPhys = (accumPhys / frames).toFixed(2);
+            const avgRender = (accumRender / frames).toFixed(2);
+            const avgFrame = (frameTimes.reduce((sum, time) => sum + time, 0) / frameTimes.length).toFixed(2);
+            const sortedFrameTimes = [...frameTimes].sort((a, b) => b - a);
+            const slowestCount = Math.max(1, Math.ceil(sortedFrameTimes.length * 0.01));
+            const onePercentLow = (1000 / (sortedFrameTimes
+                .slice(0, slowestCount)
+                .reduce((sum, time) => sum + time, 0) / slowestCount)).toFixed(0);
+            const dpr = window.devicePixelRatio || 1;
+            lastFps = frames;
+            metricsContent = `FPS: ${frames} | 1%: ${onePercentLow}<br>` +
+                `Frame: ${avgFrame}ms | Missed: ${missedFrames}<br>` +
+                `Phys: ${avgPhys}ms | CPU Render: ${avgRender}ms<br>` +
+                'GPU: N/A<br>' +
+                `Particles: ${count} | DPR: ${dpr.toFixed(2)}`;
+            if (metricsDiv.style.display !== 'none') {
+                metricsDiv.innerHTML = metricsContent;
+            }
+            frames = 0;
+            accumPhys = 0;
+            accumRender = 0;
+            frameTimes = [];
+            missedFrames = 0;
+            lastTime = t2;
         }
         
         requestAnimationFrame(draw);
