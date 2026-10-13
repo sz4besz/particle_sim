@@ -1,5 +1,4 @@
 const canvas = document.getElementById('simCanvas');
-const ctx = canvas.getContext('2d');
 
 function resize() {
     canvas.width = window.innerWidth;
@@ -8,7 +7,13 @@ function resize() {
 window.addEventListener('resize', resize);
 resize();
 
-// --- DYNAMIC PRESET GENERATORS ---
+// UI Toggle
+const gearBtn = document.getElementById('gearBtn');
+const panel = document.getElementById('panel');
+gearBtn.addEventListener('click', () => {
+    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+});
+
 const PRESETS = {
     'cells': (N) => {
         let m = new Float32Array(N * N);
@@ -50,17 +55,138 @@ function bindSlider(inputId, valId) {
     input.addEventListener('input', () => val.innerText = input.value);
 }
 
-Module.onRuntimeInitialized = function() {
-    let count = 0;
-    let particleData;
-    let colors = [];
-    let currentColors = 0;
+// Helper to convert HSL to RGB floats for the WebGPU shader
+function hslToRgb(h, s, l) {
+    h /= 360; s /= 100; l /= 100;
+    let r, g, b;
+    if (s === 0) r = g = b = l;
+    else {
+        const hue2rgb = (p, q, t) => {
+            if(t < 0) t += 1;
+            if(t > 1) t -= 1;
+            if(t < 1/6) return p + (q - p) * 6 * t;
+            if(t < 1/2) return q;
+            if(t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+            return p;
+        };
+        const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+        const p = 2 * l - q;
+        r = hue2rgb(p, q, h + 1/3);
+        g = hue2rgb(p, q, h);
+        b = hue2rgb(p, q, h - 1/3);
+    }
+    return [r, g, b, 1.0];
+}
 
-    const gearBtn = document.getElementById('gearBtn');
-    const panel = document.getElementById('panel');
+// Module initialization must be async to await WebGPU requests
+Module.onRuntimeInitialized = async function() {
+    if (!navigator.gpu) {
+        alert("WebGPU is not supported by your browser. Update to a modern browser.");
+        return;
+    }
+
+    // --- WEBGPU SETUP ---
+    const adapter = await navigator.gpu.requestAdapter();
+    const device = await adapter.requestDevice();
+    const context = canvas.getContext('webgpu');
+    const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
+    
+    context.configure({
+        device,
+        format: presentationFormat,
+        alphaMode: 'premultiplied',
+    });
+
+    const wgslShader = `
+    struct Uniforms {
+        res: vec2f,
+        radius: f32,
+    };
+    // Reading flat f32 array directly matches C++ memory stride perfectly
+    @group(0) @binding(0) var<storage, read> pData: array<f32>;
+    @group(0) @binding(1) var<storage, read> palette: array<vec4f>;
+    @group(0) @binding(2) var<uniform> unif: Uniforms;
+
+    struct VertexOutput {
+        @builtin(position) pos: vec4f,
+        @location(0) color: vec4f,
+        @location(1) localPos: vec2f,
+    };
+
+    @vertex
+    fn vs_main(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VertexOutput {
+        var out: VertexOutput;
+        let base = ii * 5u; // 5 floats per particle in C++ struct
+        let px = pData[base + 0u];
+        let py = pData[base + 1u];
+        let cIdx = u32(pData[base + 4u]);
+
+        // 6 vertices form a quad (square) for each particle
+        var corners = array<vec2f, 6>(
+            vec2f(-1.0, -1.0), vec2f( 1.0, -1.0), vec2f(-1.0,  1.0),
+            vec2f(-1.0,  1.0), vec2f( 1.0, -1.0), vec2f( 1.0,  1.0)
+        );
+        let offset = corners[vi];
+        out.localPos = offset;
+
+        let pixelPos = vec2f(px, py) + offset * unif.radius;
+        let clipX = (pixelPos.x / unif.res.x) * 2.0 - 1.0;
+        let clipY = 1.0 - (pixelPos.y / unif.res.y) * 2.0;
+
+        out.pos = vec4f(clipX, clipY, 0.0, 1.0);
+        out.color = palette[cIdx];
+        return out;
+    }
+
+    @fragment
+    fn fs_main(in: VertexOutput) -> @location(0) vec4f {
+        // Discard pixels outside the radius to make a perfect circle
+        if (length(in.localPos) > 1.0) {
+            discard;
+        }
+        return in.color;
+    }
+    `;
+
+    const module = device.createShaderModule({ code: wgslShader });
+    const pipeline = device.createRenderPipeline({
+        layout: 'auto',
+        vertex: { module, entryPoint: 'vs_main' },
+        fragment: { module, entryPoint: 'fs_main', targets: [{ format: presentationFormat }] },
+        primitive: { topology: 'triangle-list' }
+    });
+
+    // Create GPU Buffers
+    const maxParticles = 25000;
+    const particleBuffer = device.createBuffer({
+        size: maxParticles * 5 * 4, // 5 floats per particle * 4 bytes
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+    const paletteBuffer = device.createBuffer({
+        size: 20 * 4 * 4, // Max 20 colors * vec4f * 4 bytes
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+    const uniformBuffer = device.createBuffer({
+        size: 16, // resX, resY, radius, padding (4 floats)
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+
+    const bindGroup = device.createBindGroup({
+        layout: pipeline.getBindGroupLayout(0),
+        entries: [
+            { binding: 0, resource: { buffer: particleBuffer } },
+            { binding: 1, resource: { buffer: paletteBuffer } },
+            { binding: 2, resource: { buffer: uniformBuffer } },
+        ],
+    });
+
+    // --- APP LOGIC ---
+    let count = 0;
+    let currentColors = 0;
+    let particleDataPointer = 0;
+
     const applySizesBtn = document.getElementById('applySizesBtn');
     const randomBtn = document.getElementById('randomBtn');
-    
     const speedInput = document.getElementById('speedInput');
     const colorInput = document.getElementById('colorInput');
     const particleInput = document.getElementById('particleInput');
@@ -75,11 +201,7 @@ Module.onRuntimeInitialized = function() {
     bindSlider('fricInput', 'fricVal');
     bindSlider('repelInput', 'repelVal');
 
-    gearBtn.addEventListener('click', () => {
-        panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
-    });
-
-    function renderMatrixUI(numColors) {
+    function renderMatrixUI(numColors, colorsHSL) {
         const container = document.getElementById('matrixContainer');
         container.style.gridTemplateColumns = `20px repeat(${numColors}, 1fr)`;
         container.innerHTML = '<div></div>'; 
@@ -87,7 +209,7 @@ Module.onRuntimeInitialized = function() {
         for (let c = 0; c < numColors; c++) {
             const header = document.createElement('div');
             header.className = 'matrix-header';
-            header.style.backgroundColor = colors[c];
+            header.style.backgroundColor = colorsHSL[c];
             container.appendChild(header);
         }
 
@@ -97,7 +219,7 @@ Module.onRuntimeInitialized = function() {
         for (let row = 0; row < numColors; row++) {
             const rowHeader = document.createElement('div');
             rowHeader.className = 'matrix-header';
-            rowHeader.style.backgroundColor = colors[row];
+            rowHeader.style.backgroundColor = colorsHSL[row];
             container.appendChild(rowHeader);
 
             for (let col = 0; col < numColors; col++) {
@@ -125,21 +247,27 @@ Module.onRuntimeInitialized = function() {
 
     function restartEngine() {
         currentColors = parseInt(colorInput.value);
-        const numParticles = parseInt(particleInput.value);
+        count = parseInt(particleInput.value);
+        if (count > maxParticles) count = maxParticles;
 
-        colors = [];
+        let colorsHSL = [];
+        let paletteRaw = new Float32Array(currentColors * 4);
+
         for (let i = 0; i < currentColors; i++) {
-            colors.push(`hsl(${(i * 360) / currentColors}, 100%, 60%)`);
+            let hue = (i * 360) / currentColors;
+            colorsHSL.push(`hsl(${hue}, 100%, 60%)`);
+            let rgb = hslToRgb(hue, 100, 60);
+            paletteRaw.set(rgb, i * 4);
         }
 
+        // Upload palette to GPU
+        device.queue.writeBuffer(paletteBuffer, 0, paletteRaw);
+
         Module._init_matrix(currentColors);
-        Module._init_particles(canvas.width, canvas.height, numParticles);
+        Module._init_particles(canvas.width, canvas.height, count);
+        particleDataPointer = Module._getData();
 
-        const pointer = Module._getData();
-        count = Module._getParticleCount();
-        particleData = Module.HEAPF32.subarray(pointer / 4, (pointer / 4) + (count * 5));
-
-        renderMatrixUI(currentColors);
+        renderMatrixUI(currentColors, colorsHSL);
     }
 
     function applyRules(type) {
@@ -158,7 +286,10 @@ Module.onRuntimeInitialized = function() {
             for(let i = 0; i < matrixData.length; i++) matrixData[i] = p.matrix[i];
         }
         
-        renderMatrixUI(currentColors);
+        // Re-render UI colors based on current HSL array
+        let colorsHSL = [];
+        for (let i = 0; i < currentColors; i++) colorsHSL.push(`hsl(${(i * 360) / currentColors}, 100%, 60%)`);
+        renderMatrixUI(currentColors, colorsHSL);
     }
 
     applySizesBtn.addEventListener('click', restartEngine);
@@ -174,39 +305,49 @@ Module.onRuntimeInitialized = function() {
         const repel = parseFloat(repelInput.value);
         const cFriction = 1.0 - parseFloat(fricInput.value); 
 
-        // Advance Physics
+        // 1. Calculate Physics on CPU/WASM
         Module._step(canvas.width, canvas.height, speed, r_min, r_max, cFriction, repel);
         
-        // Clear screen with a solid dark color
-        ctx.fillStyle = '#0d0d12';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        
-        // --- HIGH PERFORMANCE BATCH RENDERING ---
-        // Loop through each color palette ONCE
-        for (let c = 0; c < currentColors; c++) {
-            ctx.fillStyle = colors[c];
-            ctx.beginPath();
-            
-            // Draw all particles of this color in a single path
-            for (let i = 0; i < count; i++) {
-                let base = i * 5;
-                let colorIndex = particleData[base + 4];
+        // 2. Upload WASM memory directly to GPU Storage Buffer
+        const wasmMemory = Module.HEAPF32.buffer;
+        device.queue.writeBuffer(
+            particleBuffer, 
+            0, 
+            wasmMemory, 
+            particleDataPointer, // byteOffset where particle data starts
+            count * 5 * 4      // total bytes to copy
+        );
 
-                if (colorIndex === c) {
-                    let x = particleData[base];
-                    let y = particleData[base + 1];
-                    // Rectangles draw much faster than round arcs on CPU
-                    ctx.rect(x - 1.5, y - 1.5, 3, 3);
-                }
-            }
-            // Execute the batch draw
-            ctx.fill();
-        }
+        // 3. Upload screen resolution and radius
+        device.queue.writeBuffer(
+            uniformBuffer, 
+            0, 
+            new Float32Array([canvas.width, canvas.height, 3.0, 0.0])
+        );
+
+        // 4. Render
+        const commandEncoder = device.createCommandEncoder();
+        const passEncoder = commandEncoder.beginRenderPass({
+            colorAttachments: [{
+                view: context.getCurrentTexture().createView(),
+                clearValue: { r: 0.05, g: 0.05, b: 0.07, a: 1.0 },
+                loadOp: 'clear',
+                storeOp: 'store',
+            }]
+        });
+
+        passEncoder.setPipeline(pipeline);
+        passEncoder.setBindGroup(0, bindGroup);
+        // Draw 6 vertices per particle (quad), 'count' instances
+        passEncoder.draw(6, count, 0, 0);
+        passEncoder.end();
+
+        device.queue.submit([commandEncoder.finish()]);
         
         requestAnimationFrame(draw);
     }
     
     restartEngine();
-    applyRules('chains'); 
+    applyRules('chains');
     draw();
 };
