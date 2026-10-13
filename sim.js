@@ -90,7 +90,13 @@ Module.onRuntimeInitialized = async function() {
 
     // --- WEBGPU SETUP ---
     const adapter = await navigator.gpu.requestAdapter();
-    const device = await adapter.requestDevice();
+    if (!adapter) {
+        alert("No compatible WebGPU adapter was found.");
+        return;
+    }
+    const device = await adapter.requestDevice({
+        requiredFeatures: adapter.features.has('timestamp-query') ? ['timestamp-query'] : [],
+    });
     const context = canvas.getContext('webgpu');
     const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
     
@@ -183,6 +189,17 @@ Module.onRuntimeInitialized = async function() {
         ],
     });
 
+    const hasGpuTimestamps = device.features.has('timestamp-query');
+    const gpuQuerySet = hasGpuTimestamps ? device.createQuerySet({ type: 'timestamp', count: 2 }) : null;
+    const gpuResolveBuffer = hasGpuTimestamps ? device.createBuffer({
+        size: 16,
+        usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC,
+    }) : null;
+    const gpuReadbackBuffer = hasGpuTimestamps ? device.createBuffer({
+        size: 16,
+        usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+    }) : null;
+
     // --- APP LOGIC ---
     let count = 0;
     let currentColors = 0;
@@ -192,8 +209,20 @@ Module.onRuntimeInitialized = async function() {
     let lastFps = 0;
     let accumPhys = 0;
     let accumRender = 0;
+    let previousFrameTime = performance.now();
+    let frameTimes = [];
+    let missedFrames = 0;
+    let gpuTimeMs = null;
+    let gpuTimeSum = 0;
+    let gpuSamples = 0;
+    let gpuReadbackPending = false;
     const metricsDiv = document.getElementById('metrics');
+    let metricsContent = 'FPS: 0 | 1%: 0<br>Frame: 0.00ms | Missed: 0<br>' +
+        'Phys: 0.00ms | CPU Render: 0.00ms<br>GPU: N/A<br>Particles: 0 | DPR: 1.00';
 
+    const gearBtn = document.getElementById('gearBtn');
+    const panel = document.getElementById('panel');
+    const metricsBtn = document.getElementById('metricsBtn');
     const applySizesBtn = document.getElementById('applySizesBtn');
     const randomBtn = document.getElementById('randomBtn');
     const speedInput = document.getElementById('speedInput');
@@ -209,6 +238,34 @@ Module.onRuntimeInitialized = async function() {
     bindSlider('rmaxInput', 'rmaxVal');
     bindSlider('fricInput', 'fricVal');
     bindSlider('repelInput', 'repelVal');
+
+    gearBtn.addEventListener('click', () => {
+        const opening = panel.style.display === 'none';
+        panel.style.display = opening ? 'block' : 'none';
+        if (opening) {
+            metricsDiv.style.display = 'none';
+        }
+    });
+
+    metricsBtn.addEventListener('click', () => {
+        const opening = metricsDiv.style.display === 'none';
+        if (opening) {
+            metricsDiv.innerHTML = metricsContent;
+        }
+        metricsDiv.style.display = opening ? 'block' : 'none';
+    });
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key.toLowerCase() !== 'm') {
+            return;
+        }
+
+        const isVisible = metricsBtn.style.display !== 'none';
+        metricsBtn.style.display = isVisible ? 'none' : 'flex';
+        if (isVisible) {
+            metricsDiv.style.display = 'none';
+        }
+    });
 
     function renderMatrixUI(numColors, colorsHSL) {
         const container = document.getElementById('matrixContainer');
@@ -338,14 +395,22 @@ Module.onRuntimeInitialized = async function() {
 
         // 4. Render
         const commandEncoder = device.createCommandEncoder();
-        const passEncoder = commandEncoder.beginRenderPass({
+        const renderPassDescriptor = {
             colorAttachments: [{
                 view: context.getCurrentTexture().createView(),
                 clearValue: { r: 0.05, g: 0.05, b: 0.07, a: 1.0 },
                 loadOp: 'clear',
                 storeOp: 'store',
             }]
-        });
+        };
+        if (gpuQuerySet) {
+            renderPassDescriptor.timestampWrites = {
+                querySet: gpuQuerySet,
+                beginningOfPassWriteIndex: 0,
+                endOfPassWriteIndex: 1,
+            };
+        }
+        const passEncoder = commandEncoder.beginRenderPass(renderPassDescriptor);
 
         passEncoder.setPipeline(pipeline);
         passEncoder.setBindGroup(0, bindGroup);
@@ -353,19 +418,65 @@ Module.onRuntimeInitialized = async function() {
         passEncoder.draw(6, count, 0, 0);
         passEncoder.end();
 
+        if (gpuQuerySet) {
+            commandEncoder.resolveQuerySet(gpuQuerySet, 0, 2, gpuResolveBuffer, 0);
+            if (!gpuReadbackPending) {
+                commandEncoder.copyBufferToBuffer(gpuResolveBuffer, 0, gpuReadbackBuffer, 0, 16);
+                gpuReadbackPending = true;
+            }
+        }
         device.queue.submit([commandEncoder.finish()]);
         const t2 = performance.now();
+        if (gpuReadbackPending && gpuReadbackBuffer.mapState === 'unmapped') {
+            gpuReadbackBuffer.mapAsync(GPUMapMode.READ).then(() => {
+                const timestamps = new BigUint64Array(gpuReadbackBuffer.getMappedRange());
+                const elapsedNanoseconds = Number(timestamps[1] - timestamps[0]);
+                gpuTimeMs = elapsedNanoseconds / 1000000;
+                gpuTimeSum += gpuTimeMs;
+                gpuSamples++;
+                gpuReadbackBuffer.unmap();
+                gpuReadbackPending = false;
+            }).catch((error) => {
+                console.error('Unable to read GPU timestamp query:', error);
+                gpuReadbackPending = false;
+            });
+        }
+        const frameTime = t2 - previousFrameTime;
+        previousFrameTime = t2;
         accumPhys += (t1 - t0);
         accumRender += (t2 - t1);
+        frameTimes.push(frameTime);
+        if (frameTime > (1000 / 60) * 1.1) {
+            missedFrames++;
+        }
         frames++;
 
         if (t2 - lastTime >= 1000) {
             const avgPhys = (accumPhys / frames).toFixed(2);
             const avgRender = (accumRender / frames).toFixed(2);
-            metricsDiv.innerHTML = `FPS: ${frames}<br>Phys: ${avgPhys}ms<br>Render: ${avgRender}ms`;
+            const avgFrame = (frameTimes.reduce((sum, time) => sum + time, 0) / frameTimes.length).toFixed(2);
+            const sortedFrameTimes = [...frameTimes].sort((a, b) => b - a);
+            const slowestCount = Math.max(1, Math.ceil(sortedFrameTimes.length * 0.01));
+            const onePercentLow = (1000 / (sortedFrameTimes
+                .slice(0, slowestCount)
+                .reduce((sum, time) => sum + time, 0) / slowestCount)).toFixed(0);
+            const averageGpu = gpuSamples > 0 ? `${(gpuTimeSum / gpuSamples).toFixed(2)}ms` : 'N/A';
+            const dpr = window.devicePixelRatio || 1;
+            metricsContent = `FPS: ${frames} | 1%: ${onePercentLow}<br>` +
+                `Frame: ${avgFrame}ms | Missed: ${missedFrames}<br>` +
+                `Phys: ${avgPhys}ms | CPU Render: ${avgRender}ms<br>` +
+                `GPU: ${averageGpu}<br>` +
+                `Particles: ${count} | DPR: ${dpr.toFixed(2)}`;
+            if (metricsDiv.style.display !== 'none') {
+                metricsDiv.innerHTML = metricsContent;
+            }
             frames = 0;
             accumPhys = 0;
             accumRender = 0;
+            frameTimes = [];
+            missedFrames = 0;
+            gpuTimeSum = 0;
+            gpuSamples = 0;
             lastTime = t2;
         }
         
