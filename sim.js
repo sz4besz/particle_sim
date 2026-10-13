@@ -1,4 +1,18 @@
 const canvas = document.getElementById('simCanvas');
+const metricsBtn = document.getElementById('metricsBtn');
+const metricsDiv = document.getElementById('metrics');
+
+document.addEventListener('keydown', (event) => {
+    if (event.key.toLowerCase() !== 'm') {
+        return;
+    }
+
+    const isVisible = getComputedStyle(metricsBtn).display !== 'none';
+    metricsBtn.style.display = isVisible ? 'none' : 'flex';
+    if (isVisible) {
+        metricsDiv.style.display = 'none';
+    }
+});
 
 function resize() {
     const dpr = window.devicePixelRatio || 1;
@@ -253,18 +267,6 @@ Module.onRuntimeInitialized = async function() {
             metricsDiv.innerHTML = metricsContent;
         }
         metricsDiv.style.display = opening ? 'block' : 'none';
-    });
-
-    document.addEventListener('keydown', (event) => {
-        if (event.key.toLowerCase() !== 'm') {
-            return;
-        }
-
-        const isVisible = metricsBtn.style.display !== 'none';
-        metricsBtn.style.display = isVisible ? 'none' : 'flex';
-        if (isVisible) {
-            metricsDiv.style.display = 'none';
-        }
     });
 
     function renderMatrixUI(numColors, colorsHSL) {
