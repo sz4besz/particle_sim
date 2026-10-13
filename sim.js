@@ -392,7 +392,7 @@ Module.onRuntimeInitialized = async function() {
         device.queue.writeBuffer(
             uniformBuffer, 
             0, 
-            new Float32Array([canvas.width, canvas.height, 3.0, 0.0])
+            new Float32Array([canvas.width, canvas.height, 1.5, 0.0])
         );
 
         // 4. Render
